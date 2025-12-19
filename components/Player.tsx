@@ -1,5 +1,5 @@
 
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useMemo } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { PointerLockControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -16,7 +16,6 @@ interface PlayerProps {
   canWin: boolean;
   onWin: () => void;
   mobileMovement: JoystickInput;
-  mobileLook: JoystickInput;
   isSprintActive: boolean;
   isJumpRequested: boolean;
   clearJumpRequest: () => void;
@@ -24,9 +23,9 @@ interface PlayerProps {
   isMobile: boolean;
 }
 
-const WALK_SPEED = 5;
-const SPRINT_SPEED = 9;
-const LOOK_SENSITIVITY = 1.8;
+const WALK_SPEED = 6.5;
+const SPRINT_SPEED = 11;
+const LOOK_SENSITIVITY_MOBILE = 0.005;
 const WORLD_BOUNDARY = 98.5;
 const WIN_ZONE_POSITION = new THREE.Vector3(0, 0, -40);
 const WIN_DISTANCE = 5;
@@ -34,8 +33,8 @@ const PLAYER_RADIUS = 0.6;
 const EYE_HEIGHT = 1.7;
 const GRAVITY = 25;
 const JUMP_FORCE = 8.5;
-const FOOTSTEP_INTERVAL_WALK = 0.42;
-const FOOTSTEP_INTERVAL_SPRINT = 0.28;
+const FOOTSTEP_INTERVAL_WALK = 0.38;
+const FOOTSTEP_INTERVAL_SPRINT = 0.22;
 const FOOTSTEP_URL = "https://cdn.pixabay.com/audio/2022/03/10/audio_f5519f6c01.mp3";
 
 const PlayerBody: React.FC<{ isMoving: boolean; isSprinting: boolean }> = ({ isMoving, isSprinting }) => {
@@ -45,12 +44,16 @@ const PlayerBody: React.FC<{ isMoving: boolean; isSprinting: boolean }> = ({ isM
 
   useFrame((state) => {
     const time = state.clock.getElapsedTime();
-    const walkSpeed = isSprinting ? 12 : 8;
+    const walkSpeed = isSprinting ? 16 : 12;
     const walkCycle = Math.sin(time * walkSpeed);
     if (isMoving) {
       if (leftLegRef.current) leftLegRef.current.rotation.x = walkCycle * 0.5;
       if (rightLegRef.current) rightLegRef.current.rotation.x = -walkCycle * 0.5;
       if (bodyGroupRef.current) bodyGroupRef.current.position.y = Math.abs(walkCycle) * 0.05;
+    } else {
+      if (leftLegRef.current) leftLegRef.current.rotation.x = 0;
+      if (rightLegRef.current) rightLegRef.current.rotation.x = 0;
+      if (bodyGroupRef.current) bodyGroupRef.current.position.y = 0;
     }
   });
 
@@ -74,14 +77,13 @@ export const Player: React.FC<PlayerProps> = ({
   canWin, 
   onWin,
   mobileMovement,
-  mobileLook,
   isSprintActive,
   isJumpRequested,
   clearJumpRequest,
   active,
   isMobile
 }) => {
-  const { camera } = useThree();
+  const { camera, gl } = useThree();
   const moveState = useRef({ forward: false, backward: false, left: false, right: false, sprint: false, jump: false });
   const velocity = useRef(new THREE.Vector3());
   const raycaster = useRef(new THREE.Raycaster());
@@ -93,7 +95,13 @@ export const Player: React.FC<PlayerProps> = ({
   
   const verticalVelocity = useRef(0);
   const isGrounded = useRef(true);
-  const euler = useRef(new THREE.Euler(0, 0, 0, 'YXZ'));
+  
+  const lastTouchRef = useRef({ x: 0, y: 0 });
+  const lookRotationRef = useRef({ yaw: 0, pitch: 0 });
+
+  const supportsPointerLock = useMemo(() => {
+    return typeof document !== 'undefined' && !!document.documentElement.requestPointerLock;
+  }, []);
 
   useEffect(() => {
     footstepAudio.current = new Audio(FOOTSTEP_URL);
@@ -124,7 +132,26 @@ export const Player: React.FC<PlayerProps> = ({
       }
     };
 
-    const handleMobileTouch = (e: TouchEvent) => {
+    const handleTouchStart = (e: TouchEvent) => {
+      if (!active || isScaring) return;
+      const touch = e.touches[e.touches.length - 1];
+      lastTouchRef.current = { x: touch.clientX, y: touch.clientY };
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (!active || isScaring || !isMobile) return;
+      const touch = e.touches[e.touches.length - 1];
+      const dx = touch.clientX - lastTouchRef.current.x;
+      const dy = touch.clientY - lastTouchRef.current.y;
+      
+      lookRotationRef.current.yaw -= dx * LOOK_SENSITIVITY_MOBILE;
+      lookRotationRef.current.pitch -= dy * LOOK_SENSITIVITY_MOBILE;
+      lookRotationRef.current.pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, lookRotationRef.current.pitch));
+      
+      lastTouchRef.current = { x: touch.clientX, y: touch.clientY };
+    };
+
+    const handleMobileInteract = (e: TouchEvent) => {
       if (!active) return;
       const target = e.target as HTMLElement;
       if (target.closest('#mobile-interact')) {
@@ -133,16 +160,27 @@ export const Player: React.FC<PlayerProps> = ({
       }
     };
 
+    // Defensive handling for PointerLock errors
+    const handlePLError = (e: Event) => {
+      console.warn("PointerLock failed:", e);
+    };
+
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
-    window.addEventListener('touchstart', handleMobileTouch);
+    window.addEventListener('touchstart', handleTouchStart);
+    window.addEventListener('touchmove', handleTouchMove, { passive: false });
+    window.addEventListener('touchstart', handleMobileInteract);
+    document.addEventListener('pointerlockerror', handlePLError);
 
     return () => { 
       window.removeEventListener('keydown', handleKeyDown); 
       window.removeEventListener('keyup', handleKeyUp);
-      window.removeEventListener('touchstart', handleMobileTouch);
+      window.removeEventListener('touchstart', handleTouchStart);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchstart', handleMobileInteract);
+      document.removeEventListener('pointerlockerror', handlePLError);
     };
-  }, [onToggleFlashlight, onInteract, camera, isScaring, active]);
+  }, [onToggleFlashlight, onInteract, camera, isScaring, active, isMobile]);
 
   useFrame((state, delta) => {
     if (!active || isScaring) {
@@ -150,17 +188,15 @@ export const Player: React.FC<PlayerProps> = ({
       return;
     }
 
-    // --- MOBILE LOOK ROTATION ---
+    // --- CAMERA ROTATION ---
     if (isMobile) {
-      euler.current.setFromQuaternion(camera.quaternion);
-      euler.current.y -= mobileLook.x * LOOK_SENSITIVITY * delta;
-      euler.current.x -= mobileLook.y * LOOK_SENSITIVITY * delta;
-      euler.current.x = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, euler.current.x));
-      camera.quaternion.setFromEuler(euler.current);
+      camera.rotation.order = 'YXZ';
+      camera.rotation.y = lookRotationRef.current.yaw;
+      camera.rotation.x = lookRotationRef.current.pitch;
     }
 
     const isMovingKbd = moveState.current.forward || moveState.current.backward || moveState.current.left || moveState.current.right;
-    const isMovingMobile = Math.abs(mobileMovement.x) > 0.1 || Math.abs(mobileMovement.y) > 0.1;
+    const isMovingMobile = Math.abs(mobileMovement.x) > 0.05 || Math.abs(mobileMovement.y) > 0.05;
     const isSprinting = (isMovingKbd && moveState.current.sprint) || (isMovingMobile && isSprintActive);
 
     // Physics: Vertical Movement (Gravity and Jumping)
@@ -195,7 +231,7 @@ export const Player: React.FC<PlayerProps> = ({
     }
 
     direction.y = 0; 
-    velocity.current.lerp(direction, 0.15);
+    velocity.current.lerp(direction, 0.3); // Tightened for better walk response
 
     let nextX = camera.position.x + velocity.current.x * delta;
     let nextZ = camera.position.z + velocity.current.z * delta;
@@ -232,7 +268,7 @@ export const Player: React.FC<PlayerProps> = ({
     // Flashlight Bobbing
     if (flashlightRef.current) {
       const time = state.clock.getElapsedTime();
-      const bobY = (isGrounded.current && (isMovingKbd || isMovingMobile)) ? Math.sin(time * (isSprinting ? 12 : 8)) * 0.04 : 0;
+      const bobY = (isGrounded.current && (isMovingKbd || isMovingMobile)) ? Math.sin(time * (isSprinting ? 16 : 12)) * 0.04 : 0;
       flashlightRef.current.position.y = -0.45 + bobY;
       flashlightRef.current.traverse((obj) => {
         if (obj instanceof THREE.Light && obj.name === 'mainSpot') obj.intensity = flashlightOn ? 800 : 0;
@@ -242,11 +278,11 @@ export const Player: React.FC<PlayerProps> = ({
 
   return (
     <>
-      {active && !isMobile && <PointerLockControls makeDefault />}
+      {active && !isMobile && supportsPointerLock && <PointerLockControls makeDefault />}
       <primitive object={lightTarget.current} />
       <group ref={bodyRef} position={camera.position}>
         <PlayerBody 
-          isMoving={(moveState.current.forward || moveState.current.backward || moveState.current.left || moveState.current.right || Math.abs(mobileMovement.x) > 0.1 || Math.abs(mobileMovement.y) > 0.1) && isGrounded.current} 
+          isMoving={(moveState.current.forward || moveState.current.backward || moveState.current.left || moveState.current.right || Math.abs(mobileMovement.x) > 0.05 || Math.abs(mobileMovement.y) > 0.05) && isGrounded.current} 
           isSprinting={isSprintActive || moveState.current.sprint} 
         />
       </group>

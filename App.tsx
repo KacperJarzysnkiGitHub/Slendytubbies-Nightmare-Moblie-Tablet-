@@ -45,7 +45,7 @@ const GAME_AMBIENCE_URL = "https://cdn.pixabay.com/audio/2022/03/24/audio_73d9e2
 const HEARTBEAT_SOUND_URL = "https://cdn.pixabay.com/audio/2024/02/08/audio_824707833e.mp3";
 const WIN_FANFARE_URL = "https://cdn.pixabay.com/audio/2021/08/04/audio_06250269f8.mp3";
 
-const APP_VERSION = "v1.7.0-Classic-GUI";
+const APP_VERSION = "v1.7.3-Final";
 
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>(GameState.START);
@@ -62,10 +62,8 @@ const App: React.FC = () => {
   const [musicVolume, setMusicVolume] = useState(0.5);
   const [soundVolume, setSoundVolume] = useState(0.8);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
   const [walkJoystick, setWalkJoystick] = useState<JoystickInput>({ x: 0, y: 0 });
-  const [lookJoystick, setLookJoystick] = useState<JoystickInput>({ x: 0, y: 0 });
   const [isSprintActive, setIsSprintActive] = useState(false);
   const [isJumpRequested, setIsJumpRequested] = useState(false);
 
@@ -80,29 +78,30 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const checkMobile = () => {
-      setIsMobile('ontouchstart' in window || navigator.maxTouchPoints > 0);
+      // More accurate handheld mobile detection (ignores touch laptops)
+      const userAgent = navigator.userAgent || navigator.vendor;
+      const handheld = /android|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent.toLowerCase());
+      setIsMobile(handheld);
     };
     checkMobile();
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  const downloadAppFile = () => {
-    const htmlContent = `<!DOCTYPE html><html><head><title>Nightmare Launcher</title><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="background:#000;color:#fff;text-align:center;font-family:sans-serif;padding-top:20vh"><h1>NIGHTMARE OFFLINE</h1><p>Install the game via the 'Add to Home Screen' button on the live site for the full APK experience.</p><button onclick="window.history.back()" style="padding:15px 30px;background:#b91c1c;border:none;color:#fff;font-weight:bold;cursor:pointer">BACK TO GAME</button></body></html>`;
+  const downloadAppFile = useCallback(() => {
+    const htmlContent = `<!DOCTYPE html><html><head><title>Slendytubbies Nightmare Installer</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{background:#000;color:#fff;text-align:center;font-family:sans-serif;padding:20px;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0}h1{color:#b91c1c;font-size:3rem;margin-bottom:10px}p{color:#888;max-width:400px;line-height:1.5}.btn{padding:15px 40px;background:#b91c1c;border:none;color:#fff;font-weight:bold;cursor:pointer;border-radius:5px;text-decoration:none;margin-top:30px;box-shadow:0 0 20px rgba(185,28,28,0.5)}</style></head><body><h1>SLENDYTUBBIES APK</h1><p>To install the full game on your Mobile or Tablet device, open the original game link and use the "Add to Home Screen" feature in your browser's menu.</p><a href="${window.location.href}" class="btn">OPEN ORIGINAL LINK</a></body></html>`;
     const blob = new Blob([htmlContent], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'TubbyNightmare_Launcher.html';
+    link.download = 'Slendytubbies_Nightmare_Installer.html';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-  };
+  }, []);
 
   useEffect(() => {
-    const handleBeforeInstallPrompt = (e: any) => { e.preventDefault(); setDeferredPrompt(e); };
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     const initAudio = (url: string, loop: boolean = false, initialVolume: number = 0.5) => {
       const audio = new Audio(url);
       audio.loop = loop;
@@ -118,7 +117,6 @@ const App: React.FC = () => {
     winAudio.current = initAudio(WIN_FANFARE_URL, false, soundVolume);
     return () => {
       [menuAudio, gameAudio, heartbeatAudio, winAudio].forEach(ref => { if (ref.current) ref.current.pause(); });
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     };
   }, []);
 
@@ -150,7 +148,7 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [gameState, flashlightOn]);
 
-  const initGame = () => {
+  const initGame = useCallback(() => {
     const newCustards: ICustard[] = [];
     newCustards.push({ id: 'house-1', position: [5, 0.2, -45] });
     newCustards.push({ id: 'house-2', position: [-5, 0.2, -42] });
@@ -172,7 +170,7 @@ const App: React.FC = () => {
     if (document.documentElement.requestFullscreen) {
       document.documentElement.requestFullscreen().catch(() => {});
     }
-  };
+  }, []);
 
   const handleInteract = useCallback((raycaster: THREE.Raycaster) => {
     if (gameState !== GameState.PLAYING || isScaring) return;
@@ -194,9 +192,9 @@ const App: React.FC = () => {
     }
   }, [gameState, isScaring]);
 
-  const handleJoystick = (e: React.TouchEvent | React.MouseEvent, type: 'walk' | 'look') => {
+  const handleJoystick = (e: React.TouchEvent | React.MouseEvent) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    const touch = 'touches' in e ? e.touches[0] : e;
+    const touch = 'touches' in e ? e.touches[0] : (e as any);
     const centerX = rect.left + rect.width / 2;
     const centerY = rect.top + rect.height / 2;
     const dx = touch.clientX - centerX;
@@ -206,18 +204,14 @@ const App: React.FC = () => {
     const limitedDist = Math.min(distance, maxDist);
     const angle = Math.atan2(dy, dx);
     
-    const input = {
+    setWalkJoystick({
       x: (Math.cos(angle) * limitedDist) / maxDist,
       y: (Math.sin(angle) * limitedDist) / maxDist
-    };
-
-    if (type === 'walk') setWalkJoystick(input);
-    else setLookJoystick(input);
+    });
   };
 
-  const handleJoystickEnd = (type: 'walk' | 'look') => {
-    if (type === 'walk') setWalkJoystick({ x: 0, y: 0 });
-    else setLookJoystick({ x: 0, y: 0 });
+  const handleJoystickEnd = () => {
+    setWalkJoystick({ x: 0, y: 0 });
   };
 
   const handleCatch = useCallback(() => {
@@ -240,6 +234,14 @@ const App: React.FC = () => {
       setGameState(GameState.WIN);
     }
   }, [collectedCount]);
+
+  const exitToMenu = useCallback(() => {
+    // Explicitly release pointer lock before unmounting Canvas to avoid "removed from DOM" error
+    if (document.pointerLockElement) {
+      document.exitPointerLock();
+    }
+    setGameState(GameState.START);
+  }, []);
 
   const getBatteryIcon = () => {
     if (battery > 70) return <BatteryFull size={24} className="text-green-500" />;
@@ -320,7 +322,6 @@ const App: React.FC = () => {
               canWin={collectedCount === TOTAL_CUSTARDS} 
               onWin={handleWin}
               mobileMovement={walkJoystick}
-              mobileLook={lookJoystick}
               isSprintActive={isSprintActive}
               isJumpRequested={isJumpRequested}
               clearJumpRequest={() => setIsJumpRequested(false)}
@@ -346,10 +347,7 @@ const App: React.FC = () => {
             </div>
             <div className="flex flex-col gap-4 w-72">
               <button onClick={initGame} className="bg-red-800 hover:bg-red-700 border-b-[6px] border-red-950 text-white py-5 font-black uppercase tracking-widest text-xl flex items-center justify-center gap-3 active:scale-95 cursor-pointer"> <Play fill="white" size={20} /> START GAME </button>
-              {deferredPrompt && (
-                <button onClick={() => { deferredPrompt.prompt(); setDeferredPrompt(null); }} className="bg-cyan-900/60 hover:bg-cyan-800 border-b-2 border-cyan-950 text-cyan-400 py-3 font-bold uppercase tracking-widest text-xs flex items-center justify-center gap-2 active:scale-95 cursor-pointer"> <Zap size={14} /> INSTALL APK (PWA) </button>
-              )}
-              <button onClick={downloadAppFile} className="bg-zinc-900/80 hover:bg-zinc-800 border-b-2 border-zinc-950 text-zinc-400 py-3 font-bold uppercase tracking-widest text-xs flex items-center justify-center gap-2 active:scale-95 cursor-pointer"> <Download size={14} /> DOWNLOAD OFFLINE </button>
+              <button onClick={downloadAppFile} className="bg-zinc-900/80 hover:bg-zinc-800 border-b-2 border-zinc-950 text-zinc-400 py-3 font-bold uppercase tracking-widest text-xs flex items-center justify-center gap-2 active:scale-95 cursor-pointer"> <Download size={14} /> DOWNLOAD APK </button>
               <button onClick={() => setIsSettingsOpen(true)} className="bg-zinc-900/80 hover:bg-zinc-800 border-b-2 border-zinc-950 text-zinc-500 py-3 font-bold uppercase tracking-widest text-xs flex items-center justify-center gap-2 active:scale-95 cursor-pointer"> <SettingsIcon size={14} /> SETTINGS </button>
             </div>
             <div className="absolute bottom-6 right-8 text-zinc-700 font-mono text-[10px] tracking-widest uppercase opacity-40"> {APP_VERSION} </div>
@@ -362,7 +360,7 @@ const App: React.FC = () => {
             <div className="absolute top-8 left-8 pointer-events-auto">
               <button 
                 onPointerDown={(e) => e.stopPropagation()}
-                onClick={() => setGameState(GameState.START)}
+                onClick={exitToMenu}
                 className="retro-menu-text font-serif italic"
               >
                 Main Menu
@@ -383,11 +381,12 @@ const App: React.FC = () => {
 
             {isMobile && (
               <div className="absolute inset-0 h-full w-full pointer-events-none">
-                {/* Walk Joystick (Left) */}
+                {/* Walking Joystick (Left Bottom ONLY) */}
                 <div 
                   className="absolute bottom-10 left-10 w-44 h-44 rounded-full flex items-center justify-center pointer-events-auto touch-none mesh-texture" 
-                  onTouchMove={(e) => handleJoystick(e, 'walk')} 
-                  onTouchEnd={() => handleJoystickEnd('walk')}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onTouchMove={handleJoystick} 
+                  onTouchEnd={handleJoystickEnd}
                 >
                   <div 
                     className="w-24 h-24 rounded-full flex items-center justify-center mesh-knob" 
@@ -395,52 +394,38 @@ const App: React.FC = () => {
                   ></div>
                 </div>
 
-                {/* Look Joystick (Right) */}
-                <div 
-                  className="absolute bottom-10 right-10 w-44 h-44 rounded-full flex items-center justify-center pointer-events-auto touch-none mesh-texture" 
-                  onTouchMove={(e) => handleJoystick(e, 'look')} 
-                  onTouchEnd={() => handleJoystickEnd('look')}
-                >
-                  <div 
-                    className="w-24 h-24 rounded-full flex items-center justify-center mesh-knob" 
-                    style={{ transform: `translate(${lookJoystick.x * 50}px, ${lookJoystick.y * 50}px)` }}
-                  ></div>
-                </div>
-
                 {/* Classic Stickman Jump Button (Right Center) */}
                 <div className="absolute top-1/2 right-4 -translate-y-1/2 pointer-events-auto">
                   <button 
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onPointerUp={(e) => e.stopPropagation()}
                     className="w-24 h-24 jump-btn-retro rounded-full flex items-center justify-center active:scale-90 transition-transform shadow-2xl"
-                    onTouchStart={() => setIsJumpRequested(true)}
+                    onTouchStart={(e) => { e.stopPropagation(); setIsJumpRequested(true); }}
                   >
                     <svg viewBox="0 0 100 100" className="w-20 h-20">
-                      {/* Body */}
                       <circle cx="50" cy="20" r="10" fill="black" />
                       <path d="M50 30 L50 65" stroke="black" strokeWidth="6" />
-                      {/* Arms */}
                       <path d="M50 40 L25 25 M50 40 L80 30" stroke="black" strokeWidth="6" strokeLinecap="round" />
-                      {/* Legs */}
                       <path d="M50 65 L25 85 M50 65 L75 80" stroke="black" strokeWidth="6" strokeLinecap="round" />
-                      {/* Green Up Arrow */}
                       <path d="M85 75 L85 55 L75 65 M85 55 L95 65" stroke="#16a34a" strokeWidth="8" fill="none" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                   </button>
                 </div>
 
                 {/* Utility Buttons (Sprint/Interact/Flashlight) */}
-                <div className="absolute bottom-60 right-10 flex flex-col gap-4 pointer-events-auto">
+                <div className="absolute bottom-10 right-10 flex flex-col gap-4 pointer-events-auto">
                    <button 
                       onPointerDown={(e) => e.stopPropagation()}
                       className={`w-16 h-16 mesh-texture rounded-full flex items-center justify-center transition-colors ${isSprintActive ? 'border-red-600' : 'border-zinc-500'}`}
-                      onTouchStart={() => setIsSprintActive(true)}
-                      onTouchEnd={() => setIsSprintActive(false)}
+                      onTouchStart={(e) => { e.stopPropagation(); setIsSprintActive(true); }}
+                      onTouchEnd={(e) => { e.stopPropagation(); setIsSprintActive(false); }}
                       id="mobile-interact"
                     >
                       <Hand size={32} className={isSprintActive ? 'text-red-500' : 'text-zinc-400'} />
                     </button>
                     <button 
                       onPointerDown={(e) => e.stopPropagation()}
-                      onClick={() => { if (battery > 0) setFlashlightOn(!flashlightOn); }} 
+                      onClick={(e) => { e.stopPropagation(); if (battery > 0) setFlashlightOn(!flashlightOn); }} 
                       className={`w-16 h-16 mesh-texture rounded-full flex items-center justify-center transition-all ${flashlightOn ? 'border-yellow-400 bg-zinc-800' : 'border-zinc-700 opacity-60'}`}
                     >
                       <Eye size={28} className={flashlightOn ? 'text-yellow-400' : 'text-zinc-600'} />
@@ -476,7 +461,7 @@ const App: React.FC = () => {
                 className="bg-red-800 hover:bg-red-700 border-b-4 border-red-950 text-white py-4 font-black uppercase tracking-widest text-sm flex items-center justify-center gap-3 active:scale-95 cursor-pointer"> <RotateCcw size={18} /> RETRY </button>
               <button 
                 onPointerDown={(e) => e.stopPropagation()}
-                onClick={() => setGameState(GameState.START)} 
+                onClick={exitToMenu} 
                 className="bg-zinc-900/80 hover:bg-zinc-800 border-b-2 border-zinc-950 text-zinc-400 py-3 font-bold uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 active:scale-95 cursor-pointer"> <Home size={14} /> MAIN MENU </button>
             </div>
           </div>
@@ -487,7 +472,7 @@ const App: React.FC = () => {
             <h2 className="text-6xl font-black mb-10 uppercase italic"> SURVIVED </h2>
             <button 
               onPointerDown={(e) => e.stopPropagation()}
-              onClick={() => setGameState(GameState.START)} 
+              onClick={exitToMenu} 
               className="bg-cyan-600 hover:bg-cyan-500 text-black py-5 w-72 font-black uppercase tracking-widest text-sm border-b-4 border-cyan-800 flex items-center justify-center gap-3 active:scale-95 cursor-pointer"> <Home size={20} /> MAIN MENU </button>
           </div>
         )}
@@ -495,15 +480,15 @@ const App: React.FC = () => {
         {isSettingsOpen && (
           <div className="absolute inset-0 bg-black/98 flex items-center justify-center pointer-events-auto">
             <div className="w-full max-sm border border-zinc-800 bg-zinc-950 p-10 relative shadow-2xl m-4">
-              <button onClick={() => setIsSettingsOpen(false)} className="absolute top-6 right-6 text-zinc-600 hover:text-white cursor-pointer"><X size={24} /></button>
+              <button onPointerDown={(e) => e.stopPropagation()} onClick={() => setIsSettingsOpen(false)} className="absolute top-6 right-6 text-zinc-600 hover:text-white cursor-pointer"><X size={24} /></button>
               <h2 className="text-2xl font-black mb-10 uppercase tracking-widest text-red-700 border-b border-red-900/30 pb-4">Settings</h2>
               <div className="space-y-8">
                 <div className="space-y-2"> 
                   <div className="flex justify-between text-[11px] uppercase font-bold text-zinc-400"><span>Volume</span><span>{Math.round(soundVolume * 100)}%</span></div> 
-                  <input type="range" min="0" max="1" step="0.01" value={soundVolume} onChange={(e) => setSoundVolume(parseFloat(e.target.value))} className="w-full h-2 bg-zinc-800 rounded-lg accent-red-700" /> 
+                  <input type="range" min="0" max="1" step="0.01" value={soundVolume} onChange={(e) => setSoundVolume(parseFloat(e.target.value))} className="w-full h-2 bg-zinc-800 rounded-lg accent-red-700" onPointerDown={(e) => e.stopPropagation()} /> 
                 </div>
               </div>
-              <button onClick={() => setIsSettingsOpen(false)} className="w-full mt-10 bg-red-800 py-4 font-black uppercase text-xs tracking-widest active:scale-95 transition-transform cursor-pointer">CLOSE</button>
+              <button onPointerDown={(e) => e.stopPropagation()} onClick={() => setIsSettingsOpen(false)} className="w-full mt-10 bg-red-800 py-4 font-black uppercase text-xs tracking-widest active:scale-95 transition-transform cursor-pointer">CLOSE</button>
             </div>
           </div>
         )}
