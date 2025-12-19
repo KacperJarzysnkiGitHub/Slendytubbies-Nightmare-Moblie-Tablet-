@@ -45,7 +45,7 @@ const GAME_AMBIENCE_URL = "https://cdn.pixabay.com/audio/2022/03/24/audio_73d9e2
 const HEARTBEAT_SOUND_URL = "https://cdn.pixabay.com/audio/2024/02/08/audio_824707833e.mp3";
 const WIN_FANFARE_URL = "https://cdn.pixabay.com/audio/2021/08/04/audio_06250269f8.mp3";
 
-const APP_VERSION = "v1.7.3-Final";
+const APP_VERSION = "v1.7.4-Joystick-Fix";
 
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>(GameState.START);
@@ -78,10 +78,9 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const checkMobile = () => {
-      // More accurate handheld mobile detection (ignores touch laptops)
-      const userAgent = navigator.userAgent || navigator.vendor;
-      const handheld = /android|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent.toLowerCase());
-      setIsMobile(handheld);
+      // Inclusive detection for any touch-capable device (Mobile/Tablet/Touchscreen)
+      const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+      setIsMobile(isTouch);
     };
     checkMobile();
     window.addEventListener('resize', checkMobile);
@@ -89,7 +88,7 @@ const App: React.FC = () => {
   }, []);
 
   const downloadAppFile = useCallback(() => {
-    const htmlContent = `<!DOCTYPE html><html><head><title>Slendytubbies Nightmare Installer</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{background:#000;color:#fff;text-align:center;font-family:sans-serif;padding:20px;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0}h1{color:#b91c1c;font-size:3rem;margin-bottom:10px}p{color:#888;max-width:400px;line-height:1.5}.btn{padding:15px 40px;background:#b91c1c;border:none;color:#fff;font-weight:bold;cursor:pointer;border-radius:5px;text-decoration:none;margin-top:30px;box-shadow:0 0 20px rgba(185,28,28,0.5)}</style></head><body><h1>SLENDYTUBBIES APK</h1><p>To install the full game on your Mobile or Tablet device, open the original game link and use the "Add to Home Screen" feature in your browser's menu.</p><a href="${window.location.href}" class="btn">OPEN ORIGINAL LINK</a></body></html>`;
+    const htmlContent = `<!DOCTYPE html><html><head><title>Slendytubbies Nightmare Installer</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{background:#000;color:#fff;text-align:center;font-family:sans-serif;padding:20px;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0}h1{color:#b91c1c;font-size:3rem;margin-bottom:10px}p{color:#888;max-width:400px;line-height:1.5}.btn{padding:15px 40px;background:#b91c1c;border:none;border-radius:5px;color:#fff;font-weight:bold;cursor:pointer;text-decoration:none;margin-top:30px;box-shadow:0 0 20px rgba(185,28,28,0.5)}</style></head><body><h1>SLENDYTUBBIES APK</h1><p>To install the full game on your Mobile or Tablet device, open the original game link and use the "Add to Home Screen" feature in your browser's menu.</p><a href="${window.location.href}" class="btn">OPEN ORIGINAL LINK</a></body></html>`;
     const blob = new Blob([htmlContent], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -236,7 +235,6 @@ const App: React.FC = () => {
   }, [collectedCount]);
 
   const exitToMenu = useCallback(() => {
-    // Explicitly release pointer lock before unmounting Canvas to avoid "removed from DOM" error
     if (document.pointerLockElement) {
       document.exitPointerLock();
     }
@@ -266,6 +264,7 @@ const App: React.FC = () => {
             repeating-conic-gradient(#333 0% 25%, #222 0% 50%) 50% / 5px 5px;
           border: 4px solid #555;
           box-shadow: inset 0 0 15px rgba(0,0,0,0.8), 0 0 10px rgba(0,0,0,0.5);
+          opacity: 1;
         }
 
         .mesh-knob {
@@ -275,6 +274,7 @@ const App: React.FC = () => {
           background-size: 6px 6px;
           border: 4px solid #222;
           box-shadow: 0 5px 15px rgba(0,0,0,0.7);
+          opacity: 1;
         }
 
         .jump-btn-retro {
@@ -355,8 +355,7 @@ const App: React.FC = () => {
         )}
 
         {gameState === GameState.PLAYING && !isScaring && (
-          <div className="absolute inset-0 w-full h-full pointer-events-none">
-            {/* Top Left Classic Main Menu Text Button */}
+          <div className="absolute inset-0 w-full h-full pointer-events-none z-[600]">
             <div className="absolute top-8 left-8 pointer-events-auto">
               <button 
                 onPointerDown={(e) => e.stopPropagation()}
@@ -381,9 +380,9 @@ const App: React.FC = () => {
 
             {isMobile && (
               <div className="absolute inset-0 h-full w-full pointer-events-none">
-                {/* Walking Joystick (Left Bottom ONLY) */}
+                {/* Walking Joystick (Bottom-Left) */}
                 <div 
-                  className="absolute bottom-10 left-10 w-44 h-44 rounded-full flex items-center justify-center pointer-events-auto touch-none mesh-texture" 
+                  className="absolute bottom-10 left-10 w-44 h-44 rounded-full flex items-center justify-center pointer-events-auto touch-none mesh-texture z-[700]" 
                   onPointerDown={(e) => e.stopPropagation()}
                   onTouchMove={handleJoystick} 
                   onTouchEnd={handleJoystickEnd}
@@ -394,8 +393,8 @@ const App: React.FC = () => {
                   ></div>
                 </div>
 
-                {/* Classic Stickman Jump Button (Right Center) */}
-                <div className="absolute top-1/2 right-4 -translate-y-1/2 pointer-events-auto">
+                {/* Jump Button (Right Center) */}
+                <div className="absolute top-1/2 right-4 -translate-y-1/2 pointer-events-auto z-[700]">
                   <button 
                     onPointerDown={(e) => e.stopPropagation()}
                     onPointerUp={(e) => e.stopPropagation()}
@@ -413,7 +412,7 @@ const App: React.FC = () => {
                 </div>
 
                 {/* Utility Buttons (Sprint/Interact/Flashlight) */}
-                <div className="absolute bottom-10 right-10 flex flex-col gap-4 pointer-events-auto">
+                <div className="absolute bottom-10 right-10 flex flex-col gap-4 pointer-events-auto z-[700]">
                    <button 
                       onPointerDown={(e) => e.stopPropagation()}
                       className={`w-16 h-16 mesh-texture rounded-full flex items-center justify-center transition-colors ${isSprintActive ? 'border-red-600' : 'border-zinc-500'}`}
@@ -451,7 +450,7 @@ const App: React.FC = () => {
         )}
 
         {gameState === GameState.GAMEOVER && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/95 text-white p-6 pointer-events-auto">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/95 text-white p-6 pointer-events-auto z-[900]">
             <Skull className="text-red-600 mb-6 drop-shadow-xl" size={64} />
             <h2 className="text-7xl font-black uppercase italic text-red-700 mb-2 text-center"> YOU DIED </h2>
             <div className="flex flex-col gap-4 w-64 mt-8">
@@ -468,7 +467,7 @@ const App: React.FC = () => {
         )}
 
         {gameState === GameState.WIN && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950 text-white p-8 pointer-events-auto text-center">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950 text-white p-8 pointer-events-auto text-center z-[900]">
             <h2 className="text-6xl font-black mb-10 uppercase italic"> SURVIVED </h2>
             <button 
               onPointerDown={(e) => e.stopPropagation()}
@@ -478,7 +477,7 @@ const App: React.FC = () => {
         )}
 
         {isSettingsOpen && (
-          <div className="absolute inset-0 bg-black/98 flex items-center justify-center pointer-events-auto">
+          <div className="absolute inset-0 bg-black/98 flex items-center justify-center pointer-events-auto z-[1100]">
             <div className="w-full max-sm border border-zinc-800 bg-zinc-950 p-10 relative shadow-2xl m-4">
               <button onPointerDown={(e) => e.stopPropagation()} onClick={() => setIsSettingsOpen(false)} className="absolute top-6 right-6 text-zinc-600 hover:text-white cursor-pointer"><X size={24} /></button>
               <h2 className="text-2xl font-black mb-10 uppercase tracking-widest text-red-700 border-b border-red-900/30 pb-4">Settings</h2>
