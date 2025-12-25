@@ -1,7 +1,5 @@
-
 import React, { useRef, useEffect, useState, useMemo } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
-import { PointerLockControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { Obstacle, JoystickInput, Custard as ICustard } from '../types';
 
@@ -29,6 +27,7 @@ interface PlayerProps {
 const WALK_SPEED = 6.5;
 const SPRINT_SPEED = 11;
 const LOOK_SENSITIVITY_JOYSTICK = 2.0;
+const LOOK_SENSITIVITY_MOUSE = 0.002;
 const WORLD_BOUNDARY = 98.5;
 const WIN_ZONE_POSITION = new THREE.Vector3(0, 0, -40);
 const WIN_DISTANCE = 5;
@@ -105,10 +104,6 @@ export const Player: React.FC<PlayerProps> = ({
   
   const lookRotationRef = useRef({ yaw: 0, pitch: 0 });
 
-  const supportsPointerLock = useMemo(() => {
-    return typeof document !== 'undefined' && !!document.documentElement.requestPointerLock;
-  }, []);
-
   useEffect(() => {
     footstepAudio.current = new Audio(FOOTSTEP_URL);
     camera.add(lightTarget.current);
@@ -147,23 +142,59 @@ export const Player: React.FC<PlayerProps> = ({
       }
     };
 
-    // Defensive handling for PointerLock errors
-    const handlePLError = (e: Event) => {
-      console.warn("PointerLock failed:", e);
+    // --- Manual Pointer Lock & Mouse Look Implementation ---
+    const canvas = gl.domElement;
+    
+    const requestLock = () => {
+      if (!isMobile && active && !isScaring && document.pointerLockElement !== canvas) {
+        // Handle requestPointerLock promise which might be void in type definitions but promise in modern browsers
+        const promise = canvas.requestPointerLock() as unknown as Promise<void>;
+        if (promise && typeof promise.catch === 'function') {
+          promise.catch((err: any) => {
+            // Suppress the "Target Element removed from DOM" error specifically
+            if (err.name !== 'InvalidStateError' && err.message?.indexOf('removed from DOM') === -1) {
+               console.warn('Pointer lock failed:', err);
+            }
+          });
+        }
+      }
     };
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!active || isScaring || isMobile || document.pointerLockElement !== canvas) return;
+      
+      lookRotationRef.current.yaw -= e.movementX * LOOK_SENSITIVITY_MOUSE;
+      lookRotationRef.current.pitch -= e.movementY * LOOK_SENSITIVITY_MOUSE;
+      
+      // Clamp pitch
+      lookRotationRef.current.pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, lookRotationRef.current.pitch));
+
+      camera.rotation.order = 'YXZ';
+      camera.rotation.y = lookRotationRef.current.yaw;
+      camera.rotation.x = lookRotationRef.current.pitch;
+    };
+
+    const handleClick = () => {
+      requestLock();
+    };
+
+    if (!isMobile && active) {
+       canvas.addEventListener('click', handleClick);
+       document.addEventListener('mousemove', handleMouseMove);
+    }
 
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('touchstart', handleMobileInteract);
-    document.addEventListener('pointerlockerror', handlePLError);
 
     return () => { 
       window.removeEventListener('keydown', handleKeyDown); 
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('touchstart', handleMobileInteract);
-      document.removeEventListener('pointerlockerror', handlePLError);
+      if (canvas) canvas.removeEventListener('click', handleClick);
+      document.removeEventListener('mousemove', handleMouseMove);
     };
-  }, [onToggleFlashlight, onInteract, camera, isScaring, active, isMobile]);
+  }, [onToggleFlashlight, onInteract, camera, isScaring, active, isMobile, gl]);
 
   useFrame((state, delta) => {
     if (!active || isScaring) {
@@ -172,29 +203,25 @@ export const Player: React.FC<PlayerProps> = ({
     }
 
     // --- CUSTARD COLLECTION CHECK ---
-    // Check if player is close enough to any custard to collect it automatically
     for (const custard of custards) {
       const dx = camera.position.x - custard.position[0];
       const dz = camera.position.z - custard.position[2];
-      // Using squared distance for performance
       if (dx * dx + dz * dz < CUSTARD_COLLECT_RADIUS_SQ) {
         onCollectCustard(custard.id);
       }
     }
 
-    // --- CAMERA ROTATION (Dual Joystick Mode) ---
+    // --- CAMERA ROTATION (Mobile Joystick) ---
     if (isMobile) {
-      // Apply joystick input to rotation
       lookRotationRef.current.yaw -= mobileLook.x * LOOK_SENSITIVITY_JOYSTICK * delta;
       lookRotationRef.current.pitch -= mobileLook.y * LOOK_SENSITIVITY_JOYSTICK * delta;
-      
-      // Clamp pitch
       lookRotationRef.current.pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, lookRotationRef.current.pitch));
-
+      
       camera.rotation.order = 'YXZ';
       camera.rotation.y = lookRotationRef.current.yaw;
       camera.rotation.x = lookRotationRef.current.pitch;
     }
+    // Note: Desktop mouse rotation is applied directly in the event listener for smoother response
 
     const isMovingKbd = moveState.current.forward || moveState.current.backward || moveState.current.left || moveState.current.right;
     const isMovingMobile = Math.abs(mobileMovement.x) > 0.05 || Math.abs(mobileMovement.y) > 0.05;
@@ -233,7 +260,7 @@ export const Player: React.FC<PlayerProps> = ({
     }
 
     direction.y = 0; 
-    velocity.current.lerp(direction, 0.3); // Tightened for better walk response
+    velocity.current.lerp(direction, 0.3);
 
     let nextX = camera.position.x + velocity.current.x * delta;
     let nextZ = camera.position.z + velocity.current.z * delta;
@@ -280,7 +307,6 @@ export const Player: React.FC<PlayerProps> = ({
 
   return (
     <>
-      {active && !isMobile && supportsPointerLock && <PointerLockControls makeDefault />}
       <primitive object={lightTarget.current} />
       <group ref={bodyRef} position={camera.position}>
         <PlayerBody 

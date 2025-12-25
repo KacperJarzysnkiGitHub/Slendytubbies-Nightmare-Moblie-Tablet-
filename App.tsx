@@ -45,7 +45,7 @@ const GAME_AMBIENCE_URL = "https://cdn.pixabay.com/audio/2022/03/24/audio_73d9e2
 const HEARTBEAT_SOUND_URL = "https://cdn.pixabay.com/audio/2024/02/08/audio_824707833e.mp3";
 const WIN_FANFARE_URL = "https://cdn.pixabay.com/audio/2021/08/04/audio_06250269f8.mp3";
 
-const APP_VERSION = "v1.9.0-AutoCollect";
+const APP_VERSION = "v1.9.2-ToggleRun";
 
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>(GameState.START);
@@ -170,6 +170,7 @@ const App: React.FC = () => {
     setDangerLevel(0);
     setHorrorMessage("Collect 10 Custards...");
     
+    // We try to request fullscreen, but don't let failure stop the game start
     if (document.documentElement.requestFullscreen) {
       document.documentElement.requestFullscreen().catch(() => {});
     }
@@ -285,8 +286,9 @@ const App: React.FC = () => {
   }, [collectedCount]);
 
   const exitToMenu = useCallback(() => {
+    // Safely exit pointer lock if active
     if (document.pointerLockElement) {
-      document.exitPointerLock();
+       document.exitPointerLock(); 
     }
     setGameState(GameState.START);
   }, []);
@@ -480,15 +482,25 @@ const App: React.FC = () => {
 
                 {/* Utility Buttons (Sprint/Interact/Flashlight) */}
                 <div className="absolute bottom-64 right-6 flex flex-col gap-4 pointer-events-auto z-[700]">
-                   <button 
+                    {/* Interact Button */}
+                    <button 
                       onPointerDown={(e) => e.stopPropagation()}
-                      className={`w-16 h-16 mesh-texture rounded-full flex items-center justify-center transition-colors ${isSprintActive ? 'border-red-600' : 'border-zinc-500'}`}
-                      onTouchStart={(e) => { e.stopPropagation(); setIsSprintActive(true); }}
-                      onTouchEnd={(e) => { e.stopPropagation(); setIsSprintActive(false); }}
                       id="mobile-interact"
+                      className="w-16 h-16 mesh-texture rounded-full flex items-center justify-center border-zinc-500 active:bg-zinc-700 transition-colors"
                     >
-                      <Hand size={32} className={isSprintActive ? 'text-red-500' : 'text-zinc-400'} />
+                      <Hand size={32} className="text-zinc-400" />
                     </button>
+
+                    {/* Sprint Toggle Button */}
+                    <button 
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => { e.stopPropagation(); setIsSprintActive(prev => !prev); }}
+                      className={`w-16 h-16 mesh-texture rounded-full flex items-center justify-center transition-all ${isSprintActive ? 'border-red-600 bg-red-900/30' : 'border-zinc-500'}`}
+                    >
+                      <Zap size={32} className={isSprintActive ? 'text-red-500' : 'text-zinc-400'} fill={isSprintActive ? "currentColor" : "none"} />
+                    </button>
+
+                    {/* Flashlight Button */}
                     <button 
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => { e.stopPropagation(); if (battery > 0) setFlashlightOn(!flashlightOn); }} 
@@ -522,12 +534,10 @@ const App: React.FC = () => {
             <h2 className="text-7xl font-black uppercase italic text-red-700 mb-2 text-center"> YOU DIED </h2>
             <div className="flex flex-col gap-4 w-64 mt-8">
               <button 
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={initGame} 
+                onClick={(e) => { e.stopPropagation(); initGame(); }} 
                 className="bg-red-800 hover:bg-red-700 border-b-4 border-red-950 text-white py-4 font-black uppercase tracking-widest text-sm flex items-center justify-center gap-3 active:scale-95 cursor-pointer"> <RotateCcw size={18} /> RETRY </button>
               <button 
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={exitToMenu} 
+                onClick={(e) => { e.stopPropagation(); exitToMenu(); }} 
                 className="bg-zinc-900/80 hover:bg-zinc-800 border-b-2 border-zinc-950 text-zinc-400 py-3 font-bold uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 active:scale-95 cursor-pointer"> <Home size={14} /> MAIN MENU </button>
             </div>
           </div>
@@ -537,8 +547,7 @@ const App: React.FC = () => {
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950 text-white p-8 pointer-events-auto text-center z-[900]">
             <h2 className="text-6xl font-black mb-10 uppercase italic"> SURVIVED </h2>
             <button 
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={exitToMenu} 
+              onClick={(e) => { e.stopPropagation(); exitToMenu(); }} 
               className="bg-cyan-600 hover:bg-cyan-500 text-black py-5 w-72 font-black uppercase tracking-widest text-sm border-b-4 border-cyan-800 flex items-center justify-center gap-3 active:scale-95 cursor-pointer"> <Home size={20} /> MAIN MENU </button>
           </div>
         )}
