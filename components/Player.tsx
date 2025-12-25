@@ -3,7 +3,7 @@ import React, { useRef, useEffect, useState, useMemo } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { PointerLockControls } from '@react-three/drei';
 import * as THREE from 'three';
-import { Obstacle, JoystickInput } from '../types';
+import { Obstacle, JoystickInput, Custard as ICustard } from '../types';
 
 interface PlayerProps {
   onInteract: (raycaster: THREE.Raycaster) => void;
@@ -11,11 +11,14 @@ interface PlayerProps {
   isScaring?: boolean;
   battery: number;
   obstacles: Obstacle[];
+  custards: ICustard[];
+  onCollectCustard: (id: string) => void;
   onToggleFlashlight: () => void;
   soundVolume: number;
   canWin: boolean;
   onWin: () => void;
   mobileMovement: JoystickInput;
+  mobileLook: JoystickInput;
   isSprintActive: boolean;
   isJumpRequested: boolean;
   clearJumpRequest: () => void;
@@ -25,7 +28,7 @@ interface PlayerProps {
 
 const WALK_SPEED = 6.5;
 const SPRINT_SPEED = 11;
-const LOOK_SENSITIVITY_MOBILE = 0.005;
+const LOOK_SENSITIVITY_JOYSTICK = 2.0;
 const WORLD_BOUNDARY = 98.5;
 const WIN_ZONE_POSITION = new THREE.Vector3(0, 0, -40);
 const WIN_DISTANCE = 5;
@@ -35,6 +38,7 @@ const GRAVITY = 25;
 const JUMP_FORCE = 8.5;
 const FOOTSTEP_INTERVAL_WALK = 0.38;
 const FOOTSTEP_INTERVAL_SPRINT = 0.22;
+const CUSTARD_COLLECT_RADIUS_SQ = 2.25; // 1.5 units squared
 const FOOTSTEP_URL = "https://cdn.pixabay.com/audio/2022/03/10/audio_f5519f6c01.mp3";
 
 const PlayerBody: React.FC<{ isMoving: boolean; isSprinting: boolean }> = ({ isMoving, isSprinting }) => {
@@ -72,11 +76,14 @@ export const Player: React.FC<PlayerProps> = ({
   isScaring = false, 
   battery, 
   obstacles, 
+  custards,
+  onCollectCustard,
   onToggleFlashlight, 
   soundVolume, 
   canWin, 
   onWin,
   mobileMovement,
+  mobileLook,
   isSprintActive,
   isJumpRequested,
   clearJumpRequest,
@@ -96,7 +103,6 @@ export const Player: React.FC<PlayerProps> = ({
   const verticalVelocity = useRef(0);
   const isGrounded = useRef(true);
   
-  const lastTouchRef = useRef({ x: 0, y: 0 });
   const lookRotationRef = useRef({ yaw: 0, pitch: 0 });
 
   const supportsPointerLock = useMemo(() => {
@@ -132,25 +138,6 @@ export const Player: React.FC<PlayerProps> = ({
       }
     };
 
-    const handleTouchStart = (e: TouchEvent) => {
-      if (!active || isScaring) return;
-      const touch = e.touches[e.touches.length - 1];
-      lastTouchRef.current = { x: touch.clientX, y: touch.clientY };
-    };
-
-    const handleTouchMove = (e: TouchEvent) => {
-      if (!active || isScaring || !isMobile) return;
-      const touch = e.touches[e.touches.length - 1];
-      const dx = touch.clientX - lastTouchRef.current.x;
-      const dy = touch.clientY - lastTouchRef.current.y;
-      
-      lookRotationRef.current.yaw -= dx * LOOK_SENSITIVITY_MOBILE;
-      lookRotationRef.current.pitch -= dy * LOOK_SENSITIVITY_MOBILE;
-      lookRotationRef.current.pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, lookRotationRef.current.pitch));
-      
-      lastTouchRef.current = { x: touch.clientX, y: touch.clientY };
-    };
-
     const handleMobileInteract = (e: TouchEvent) => {
       if (!active) return;
       const target = e.target as HTMLElement;
@@ -167,16 +154,12 @@ export const Player: React.FC<PlayerProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
-    window.addEventListener('touchstart', handleTouchStart);
-    window.addEventListener('touchmove', handleTouchMove, { passive: false });
     window.addEventListener('touchstart', handleMobileInteract);
     document.addEventListener('pointerlockerror', handlePLError);
 
     return () => { 
       window.removeEventListener('keydown', handleKeyDown); 
       window.removeEventListener('keyup', handleKeyUp);
-      window.removeEventListener('touchstart', handleTouchStart);
-      window.removeEventListener('touchmove', handleTouchMove);
       window.removeEventListener('touchstart', handleMobileInteract);
       document.removeEventListener('pointerlockerror', handlePLError);
     };
@@ -188,8 +171,26 @@ export const Player: React.FC<PlayerProps> = ({
       return;
     }
 
-    // --- CAMERA ROTATION ---
+    // --- CUSTARD COLLECTION CHECK ---
+    // Check if player is close enough to any custard to collect it automatically
+    for (const custard of custards) {
+      const dx = camera.position.x - custard.position[0];
+      const dz = camera.position.z - custard.position[2];
+      // Using squared distance for performance
+      if (dx * dx + dz * dz < CUSTARD_COLLECT_RADIUS_SQ) {
+        onCollectCustard(custard.id);
+      }
+    }
+
+    // --- CAMERA ROTATION (Dual Joystick Mode) ---
     if (isMobile) {
+      // Apply joystick input to rotation
+      lookRotationRef.current.yaw -= mobileLook.x * LOOK_SENSITIVITY_JOYSTICK * delta;
+      lookRotationRef.current.pitch -= mobileLook.y * LOOK_SENSITIVITY_JOYSTICK * delta;
+      
+      // Clamp pitch
+      lookRotationRef.current.pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, lookRotationRef.current.pitch));
+
       camera.rotation.order = 'YXZ';
       camera.rotation.y = lookRotationRef.current.yaw;
       camera.rotation.x = lookRotationRef.current.pitch;
@@ -223,6 +224,7 @@ export const Player: React.FC<PlayerProps> = ({
     const direction = new THREE.Vector3();
     
     if (isMovingMobile) {
+      // In dual stick mode, movement is relative to camera view
       direction.set(mobileMovement.x, 0, mobileMovement.y).normalize().multiplyScalar(currentSpeed).applyEuler(new THREE.Euler(0, camera.rotation.y, 0));
     } else {
       const frontVector = new THREE.Vector3(0, 0, Number(moveState.current.backward) - Number(moveState.current.forward));

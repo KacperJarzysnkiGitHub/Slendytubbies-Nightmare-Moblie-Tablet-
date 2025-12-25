@@ -45,7 +45,7 @@ const GAME_AMBIENCE_URL = "https://cdn.pixabay.com/audio/2022/03/24/audio_73d9e2
 const HEARTBEAT_SOUND_URL = "https://cdn.pixabay.com/audio/2024/02/08/audio_824707833e.mp3";
 const WIN_FANFARE_URL = "https://cdn.pixabay.com/audio/2021/08/04/audio_06250269f8.mp3";
 
-const APP_VERSION = "v1.7.4-Joystick-Fix";
+const APP_VERSION = "v1.9.0-AutoCollect";
 
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>(GameState.START);
@@ -63,7 +63,11 @@ const App: React.FC = () => {
   const [soundVolume, setSoundVolume] = useState(0.8);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
+  // Joysticks
   const [walkJoystick, setWalkJoystick] = useState<JoystickInput>({ x: 0, y: 0 });
+  const [lookJoystick, setLookJoystick] = useState<JoystickInput>({ x: 0, y: 0 });
+  const lookJoystickMoved = useRef(false);
+  
   const [isSprintActive, setIsSprintActive] = useState(false);
   const [isJumpRequested, setIsJumpRequested] = useState(false);
 
@@ -171,6 +175,21 @@ const App: React.FC = () => {
     }
   }, []);
 
+  const handleCustardCollection = useCallback((id: string) => {
+    setCustards(prev => {
+      const exists = prev.find(c => c.id === id);
+      if (!exists) return prev;
+      
+      const newCustards = prev.filter(c => c.id !== id);
+      setCollectedCount(prevCount => {
+        const nextCount = prevCount + 1;
+        getHorrorMessage(nextCount, TOTAL_CUSTARDS).then(setHorrorMessage);
+        return nextCount;
+      });
+      return newCustards;
+    });
+  }, []);
+
   const handleInteract = useCallback((raycaster: THREE.Raycaster) => {
     if (gameState !== GameState.PLAYING || isScaring) return;
     if (custardsGroupRef.current) {
@@ -180,18 +199,13 @@ const App: React.FC = () => {
         while (obj && !obj.name.startsWith('custard-')) obj = obj.parent;
         if (obj) {
           const id = obj.name.replace('custard-', '');
-          setCustards(prev => prev.filter(c => c.id !== id));
-          setCollectedCount(prev => {
-            const nextCount = prev + 1;
-            getHorrorMessage(nextCount, TOTAL_CUSTARDS).then(setHorrorMessage);
-            return nextCount;
-          });
+          handleCustardCollection(id);
         }
       }
     }
-  }, [gameState, isScaring]);
+  }, [gameState, isScaring, handleCustardCollection]);
 
-  const handleJoystick = (e: React.TouchEvent | React.MouseEvent) => {
+  const handleWalkJoystick = (e: React.TouchEvent | React.MouseEvent) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const touch = 'touches' in e ? e.touches[0] : (e as any);
     const centerX = rect.left + rect.width / 2;
@@ -209,8 +223,44 @@ const App: React.FC = () => {
     });
   };
 
-  const handleJoystickEnd = () => {
+  const handleWalkJoystickEnd = () => {
     setWalkJoystick({ x: 0, y: 0 });
+  };
+
+  const handleLookJoystickStart = (e: React.TouchEvent) => {
+    e.stopPropagation();
+    lookJoystickMoved.current = false;
+  };
+
+  const handleLookJoystick = (e: React.TouchEvent | React.MouseEvent) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const touch = 'touches' in e ? e.touches[0] : (e as any);
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const dx = touch.clientX - centerX;
+    const dy = touch.clientY - centerY;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    const maxDist = rect.width / 2;
+    const limitedDist = Math.min(distance, maxDist);
+    const angle = Math.atan2(dy, dx);
+
+    if (distance > 5) {
+      lookJoystickMoved.current = true;
+    }
+    
+    setLookJoystick({
+      x: (Math.cos(angle) * limitedDist) / maxDist,
+      y: (Math.sin(angle) * limitedDist) / maxDist
+    });
+  };
+
+  const handleLookJoystickEnd = (e: React.TouchEvent) => {
+    e.stopPropagation();
+    setLookJoystick({ x: 0, y: 0 });
+    // If joystick wasn't moved significantly, treat as a tap to toggle flashlight
+    if (!lookJoystickMoved.current) {
+        if (battery > 0) setFlashlightOn(prev => !prev);
+    }
   };
 
   const handleCatch = useCallback(() => {
@@ -317,11 +367,14 @@ const App: React.FC = () => {
               isScaring={isScaring} 
               battery={battery} 
               obstacles={worldObstacles} 
+              custards={custards}
+              onCollectCustard={handleCustardCollection}
               onToggleFlashlight={() => { if (!isScaring && battery > 0) setFlashlightOn(!flashlightOn); }} 
               soundVolume={soundVolume} 
               canWin={collectedCount === TOTAL_CUSTARDS} 
               onWin={handleWin}
               mobileMovement={walkJoystick}
+              mobileLook={lookJoystick}
               isSprintActive={isSprintActive}
               isJumpRequested={isJumpRequested}
               clearJumpRequest={() => setIsJumpRequested(false)}
@@ -382,14 +435,28 @@ const App: React.FC = () => {
               <div className="absolute inset-0 h-full w-full pointer-events-none">
                 {/* Walking Joystick (Bottom-Left) */}
                 <div 
-                  className="absolute bottom-10 left-10 w-44 h-44 rounded-full flex items-center justify-center pointer-events-auto touch-none mesh-texture z-[700]" 
+                  className="absolute bottom-8 left-8 w-44 h-44 rounded-full flex items-center justify-center pointer-events-auto touch-none mesh-texture z-[700]" 
                   onPointerDown={(e) => e.stopPropagation()}
-                  onTouchMove={handleJoystick} 
-                  onTouchEnd={handleJoystickEnd}
+                  onTouchMove={handleWalkJoystick} 
+                  onTouchEnd={handleWalkJoystickEnd}
                 >
                   <div 
                     className="w-24 h-24 rounded-full flex items-center justify-center mesh-knob" 
                     style={{ transform: `translate(${walkJoystick.x * 50}px, ${walkJoystick.y * 50}px)` }}
+                  ></div>
+                </div>
+
+                 {/* Looking/Aiming Joystick (Bottom-Right) - Acts as Flashlight Toggle on Tap */}
+                 <div 
+                  className="absolute bottom-8 right-8 w-44 h-44 rounded-full flex items-center justify-center pointer-events-auto touch-none mesh-texture z-[700]" 
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onTouchStart={handleLookJoystickStart}
+                  onTouchMove={handleLookJoystick} 
+                  onTouchEnd={handleLookJoystickEnd}
+                >
+                  <div 
+                    className="w-24 h-24 rounded-full flex items-center justify-center mesh-knob" 
+                    style={{ transform: `translate(${lookJoystick.x * 50}px, ${lookJoystick.y * 50}px)` }}
                   ></div>
                 </div>
 
@@ -412,7 +479,7 @@ const App: React.FC = () => {
                 </div>
 
                 {/* Utility Buttons (Sprint/Interact/Flashlight) */}
-                <div className="absolute bottom-10 right-10 flex flex-col gap-4 pointer-events-auto z-[700]">
+                <div className="absolute bottom-64 right-6 flex flex-col gap-4 pointer-events-auto z-[700]">
                    <button 
                       onPointerDown={(e) => e.stopPropagation()}
                       className={`w-16 h-16 mesh-texture rounded-full flex items-center justify-center transition-colors ${isSprintActive ? 'border-red-600' : 'border-zinc-500'}`}
